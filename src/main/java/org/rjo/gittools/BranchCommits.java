@@ -1,4 +1,4 @@
-package org.rjo.git;
+package org.rjo.gittools;
 
 import java.io.File;
 import java.io.IOException;
@@ -9,6 +9,12 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.DefaultParser;
+import org.apache.commons.cli.HelpFormatter;
+import org.apache.commons.cli.Option;
+import org.apache.commons.cli.Options;
+import org.apache.commons.cli.ParseException;
 import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
@@ -16,38 +22,64 @@ import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 
 /**
- * Simple snippet which shows how to show diffs between branches
+ * This program analyses two git branches and displays their base commit (i.e. where the branch was created)
+ * and how many commits since then have been made on each branch.
  *
- * @author dominik.stadler at gmx.at
+ * @author rjo67
  */
 public class BranchCommits {
 
    private final static long SECONDS_IN_WEEK = 60 * 60 * 24 * 7;
+
    // per default, don't search back longer than this number of weeks for a base commit
-   private final static long DEFAULT_CUTOFF_IN_WEEKS = 8;
+   private final static String DEFAULT_CUTOFF_IN_WEEKS = "8";
+
    private long cutoffInSeconds;
    private String ref1;
    private String ref2;
    private File gitDir;
 
-   public BranchCommits(String[] args) throws IllegalArgumentException {
-      parseArgs(args);
-   }
+   private Options options;
+   private String[] args;
 
-   private void parseArgs(String[] args) throws IllegalArgumentException {
-      // TODO Auto-generated method stub
+   public BranchCommits(String[] args) {
+      Option ref1 = Option.builder("r1").longOpt("ref1").desc("first reference (optional, default 'master')").hasArg()
+            .build();
+      Option ref2 = Option.builder("r2").longOpt("ref2").desc("second reference").hasArg().build();
+      Option cutoff = Option.builder("c").longOpt("cutoff")
+            .desc("cutoff for the commit search (in weeks), default=" + DEFAULT_CUTOFF_IN_WEEKS).hasArg()
+            .type(Integer.class).build();
 
-      setCutoff(DEFAULT_CUTOFF_IN_WEEKS);
-      this.ref1 = "refs/heads/testbranch";
-      this.ref2 = "refs/heads/master";
-      this.gitDir = new File("c:/Users/rich/git/test/.git");
+      options = new Options();
+      options.addOption(ref1);
+      options.addOption(ref2);
+      options.addOption(cutoff);
+      options.addOption("h", "help", false, "displays help");
+
+      this.args = args;
    }
 
    private void setCutoff(long cutoffInWeeks) {
       this.cutoffInSeconds = cutoffInWeeks * SECONDS_IN_WEEK;
    }
 
-   private void run() throws IOException {
+   private void run() throws IOException, ParseException {
+      CommandLine cmdLine = new DefaultParser().parse(options, args);
+      if (cmdLine.hasOption("h")) {
+         HelpFormatter formatter = new HelpFormatter();
+         formatter.printHelp("BranchCommits", options);
+         return;
+      }
+      setCutoff(Integer.parseInt(cmdLine.getOptionValue("c", DEFAULT_CUTOFF_IN_WEEKS)));
+      ref1 = cmdLine.getOptionValue("r1", "refs/heads/master");
+      if (cmdLine.hasOption("r2")) {
+         ref2 = cmdLine.getOptionValue("r2");
+         // "refs/heads/testbranch2";
+      } else {
+         throw new ParseException("Value for --ref2 is missing");
+      }
+      this.gitDir = new File("c:/Users/rich/git/test/.git");
+
       try (Repository repository = new FileRepositoryBuilder().setGitDir(gitDir).readEnvironment().build()) {
 
          // the set is used for quick lookup
@@ -127,6 +159,10 @@ public class BranchCommits {
    }
 
    public static void main(String[] args) throws IOException {
-      new BranchCommits(args).run();
+      try {
+         new BranchCommits(args).run();
+      } catch (ParseException e) {
+         System.err.println(e.getMessage());
+      }
    }
 }
