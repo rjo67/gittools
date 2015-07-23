@@ -43,18 +43,22 @@ public class BranchCommits {
    private String[] args;
 
    public BranchCommits(String[] args) {
-      Option ref1 = Option.builder("r1").longOpt("ref1").desc("first reference (optional, default 'master')").hasArg()
-            .build();
-      Option ref2 = Option.builder("r2").longOpt("ref2").desc("second reference").hasArg().build();
+      Option ref1 = Option.builder("r1").longOpt("ref1").desc("first ref (optional, default='refs/heads/master')")
+            .hasArg().argName("ref1").build();
+      Option ref2 = Option.builder("r2").longOpt("ref2").desc("second ref").hasArg().argName("ref2").required().build();
+      Option gitdir = Option.builder("d").longOpt("dir")
+            .desc(".git directory (optional, will be searched for if not set)").hasArg().argName("gitdir").build();
       Option cutoff = Option.builder("c").longOpt("cutoff")
-            .desc("cutoff for the commit search (in weeks), default=" + DEFAULT_CUTOFF_IN_WEEKS).hasArg()
-            .type(Integer.class).build();
+            .desc("cutoff for the commit search (in weeks) (optional, default=" + DEFAULT_CUTOFF_IN_WEEKS + ")")
+            .hasArg().argName("cutoff").type(Integer.class).build();
 
       options = new Options();
       options.addOption(ref1);
       options.addOption(ref2);
       options.addOption(cutoff);
+      options.addOption(gitdir);
       options.addOption("h", "help", false, "displays help");
+      options.addOption("s", "short", false, "short output");
 
       this.args = args;
    }
@@ -67,7 +71,9 @@ public class BranchCommits {
       CommandLine cmdLine = new DefaultParser().parse(options, args);
       if (cmdLine.hasOption("h")) {
          HelpFormatter formatter = new HelpFormatter();
-         formatter.printHelp("BranchCommits", options);
+         formatter.printHelp(90, "BranchCommits",
+               "Displays the common commit and the resulting number of commits for two given refs", options,
+               "\nrjo67/2015", true);
          return;
       }
       setCutoff(Integer.parseInt(cmdLine.getOptionValue("c", DEFAULT_CUTOFF_IN_WEEKS)));
@@ -78,9 +84,21 @@ public class BranchCommits {
       } else {
          throw new ParseException("Value for --ref2 is missing");
       }
-      this.gitDir = new File("c:/Users/rich/git/test/.git");
+      if (cmdLine.hasOption("d")) {
+         this.gitDir = new File(cmdLine.getOptionValue("d"));
+      } else {
+         this.gitDir = findGitDir();
+      }
 
       try (Repository repository = new FileRepositoryBuilder().setGitDir(gitDir).readEnvironment().build()) {
+
+         // check refs
+         if (repository.getRef(ref1) == null) {
+            throw new ParseException("unknown ref1: " + ref1);
+         }
+         if (repository.getRef(ref2) == null) {
+            throw new ParseException("unknown ref2: " + ref2);
+         }
 
          // the set is used for quick lookup
          Set<String> commitIdsOnBranch = new HashSet<>(50);
@@ -126,22 +144,40 @@ public class BranchCommits {
          if (sharedId == null) {
             System.out.println(String.format("no shared commit between %s and %s", ref1, ref2));
          } else {
-            System.out.println(String.format("Shared commit: %.7s", sharedId));
-            int commitCount = countCommits(commitsOnBranch, sharedId);
-            showCount(commitCount, sharedId, ref1);
-            commitCount = countCommits(commitsOnBranch2, sharedId);
-            showCount(commitCount, sharedId, ref2);
+            int count1 = countCommits(commitsOnBranch, sharedId);
+            int count2 = countCommits(commitsOnBranch2, sharedId);
+            if (cmdLine.hasOption("s")) {
+               System.out.println(String.format("%.7s+%d+%d", sharedId, count1, count2));
+            } else {
+               showCount(sharedId, count1, ref1, count2, ref2);
+            }
          }
       }
    }
 
-   private static void showCount(int commitCount, String sharedId, String ref) {
-      if (commitCount == 1) {
-         System.out.println(String.format("%d commit %.7s...HEAD for %s", commitCount, sharedId, ref));
-      } else {
-         System.out.println(String.format("%d commits %.7s...HEAD for %s", commitCount, sharedId, ref));
+   /**
+    * Find the location of the .git directory, starting from the current directory.
+    *
+    * @throws ParseException
+    *            if no directory could be found
+    */
+   private File findGitDir() throws ParseException {
+      File file = new File(System.getProperty("user.dir"));
+      while (file != null) {
+         if (new File(file, ".git").isDirectory()) {
+            return new File(file, ".git");
+         }
+         file = file.getParentFile();
       }
+      throw new ParseException("Cound not find .git directory");
+   }
 
+   private static void showCount(String sharedId, int commitCount1, String ref1, int commitCount2, String ref2) {
+      System.out.println(String.format("       %d commit%s (%s)", commitCount1, commitCount1 == 1 ? "" : "s", ref1));
+      System.out.println("      /");
+      System.out.println(String.format("%.7s", sharedId));
+      System.out.println("      \\");
+      System.out.println(String.format("       %d commit%s (%s)", commitCount2, commitCount2 == 1 ? "" : "s", ref2));
    }
 
    /**
